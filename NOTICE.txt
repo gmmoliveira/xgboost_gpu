@@ -1,0 +1,11 @@
+Acknowledgement to other relevant works from which this work was derived from:
+
+* Python: "https://www.python.org/", under the license at "https://docs.python.org/3/license.html";
+* XGBoost: "https://xgboost.readthedocs.io/en/latest/", apache-2.0;
+* Dask: "https://dask.org/", 3-Clause BSD license;
+* Numpy: "https://numpy.org/", under the 3-Clause BSD license;
+* Pandas: "https://pandas.pydata.org/", 3-Clause BSD license;
+* Scikit-learn: "https://scikit-learn.org/stable/", under 3-Clause BSD license;
+
+
+Thank-you very much to all these projects. Please, note that I am not endorsed by any of the above mentioned projects.
