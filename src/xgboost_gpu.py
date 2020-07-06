@@ -9,9 +9,6 @@ License: Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0)
 This script implements functions to facilitate the execution of the XGBoost algorithm on multiple GPUs on a single-
 machine.
 ========================================================================================================================
-Thank-you to the XGBoost developers for providing the basis in which this work was derived from. Please, note that I am
-not endorsed by the XGBoost team.
-========================================================================================================================
 '''
 from xgboost.dask import DaskDMatrix, train as dask_xgboost_train, predict as dask_xgboost_predict
 from dask.dataframe import from_array, from_pandas
