@@ -49,7 +49,7 @@ def predict_xgboost_gpu(
 			):
 '''
 Predicts the output for the input features X using the 'xgb_model' running on the GPU. Please, note my tests have
-	shown much greater performance when executing the predictions over the CPU rather than the GPU based on
+	shown greater performance when executing the predictions over the CPU rather than the GPU based on
 	an input features array X of shape (10 ** 7, 10).
 
 :param xgb_model: a dask XGBoost model to use for predictions
