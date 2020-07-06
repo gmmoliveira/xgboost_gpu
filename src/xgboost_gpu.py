@@ -7,46 +7,56 @@ import numpy as np
 import pandas as pd
 
 
-def train_gpu_XGBClassifier2(X, y,
-							inplace=True, data_chunksize=None,
+def train_xgboost_gpu(
+							X, y,
+							data_chunksize=None,
 							n_gpus=None, n_threads_per_gpu=1,
 							params=None,
 							xgboost_model=None,
-							cluster_to_use=None, client=None
+							gpu_cluster=None, client=None
 							):
 	'''
+	Trains a XGBoost model on the GPU.
+	
 	:param X: a 2D matrix object of either type numpy ndarray or pandas DataFrame;
 	:param y: a 1D array of one of the following types: numpy ndarray, pandas Series or pandas DataFrame;
 	
 	:param data_chunksize: number of rows to partition input data (both X and y simultaneously) to split among multiple
 		GPU devices. Default value None splits evenly among devices;
-	:param inplace: whether X and y should be modified in place (inplace is memory efficient and should be preferred for
-		large datasets);
 	:param n_gpus: number of GPUs to be used. Default value None selects all available devices.
 	:param n_threads_per_gpu: number of threads per GPU;
 	:param params: xgboost trainning params as a python dict, refer to
 		https://xgboost.readthedocs.io/en/latest/parameter.html
 	:param xgboost_model: xgbooster object to continue training, it may be either a regular XGBoost model or a
 		dask xgboost dict
-	:param cluster_to_use: an existing dask cluster object. This param should be used if you call this method
-		too many times in quick sucessions
-	:param client: an existing dask client object. This param should be used if you call this method
-		too many times in quick sucessions
+	:param gpu_cluster: an existing dask cluster object to use. This param should be used if you call this method
+		too many times in quick successions. Note that this function doesn't close an externally created cluster.
+	:param client: an existing dask client object to use. This param should be used if you call this method
+		too many times in quick successions. Note that this function doesn't close an externally created client.
+	
 	:return:
+	A dictionary containing 2 keys:
+		* 'booster': maps to a XGBoost model
+		* 'history': maps to  another dict which informs the history of the training process, as in the following the
+			examṕle: {'train': {'logloss': ['0.48253', '0.35953']}, 'eval': {'logloss': ['0.480385', '0.357756']}}}
 	'''
-	local_gpus = LocalCUDACluster(n_workers=n_gpus, threads_per_worker=n_threads_per_gpu)
-	local_dask_client = Client(local_gpus)
+	
+	if gpu_cluster is None:
+		local_gpus = LocalCUDACluster(n_workers=n_gpus, threads_per_worker=n_threads_per_gpu)
+	else:
+		local_gpus = gpu_cluster
+	if client is None:
+		local_dask_client = Client(local_gpus, {'verbose': 0})
+	else:
+		local_dask_client = client
 	
 	if data_chunksize is None:
 		data_chunksize = X.shape[0] // len(local_gpus.cuda_visible_devices)
-	if not inplace:
-		X = X.copy()
-		y = y.copy()
 	if params is None:
 		params = {
 					'learning_rate': 0.3,
 					'max_depth': 8,
-					'objective': 'binary:hinge',
+					'objective': 'reg:squarederror',
 					'verbosity': 0,
 					'tree_method': 'gpu_hist'
 				}
@@ -66,16 +76,46 @@ def train_gpu_XGBClassifier2(X, y,
 	
 	xgb_model = dask_xgboost_train(local_dask_client, params, dtrain, num_boost_round=100, evals=[(dtrain, 'train')], xgb_model=xgboost_model)
 	
-	local_dask_client.close()
-	local_gpus.close()
-	local_dask_client.shutdown()
+	if client is None:
+		local_dask_client.close()
+	if gpu_cluster is None:
+		local_gpus.close()
 	
 	return xgb_model
 
 
-def predict_gpu_xgbmodel(xgb_model, X, data_chunksize=None, n_gpus=None, n_threads_per_gpu=1):
-	local_gpus = LocalCUDACluster(n_workers=n_gpus, threads_per_worker=n_threads_per_gpu)
-	local_dask_client = Client(local_gpus)
+def predict_xgboost_gpu(
+						xgb_model, X,
+						data_chunksize=None,
+						n_gpus=None, n_threads_per_gpu=1,
+						gpu_cluster=None, client=None
+						):
+	'''
+	Predicts the output for the input features X using the 'xgb_model' running on the GPU.
+	
+	:param xgb_model: a dask XGBoost model to use for predictions
+	:param X: the input features to use for predictions, must be either a numpy ndarray or a pandas DataFrame
+	:param data_chunksize: chunk sizes to be used on a dask dataframe, leave the default value None for auto decision
+	:param n_gpus: number of GPUs to be used. Default value None selects all available devices;
+	:param n_threads_per_gpu: number of threads per GPU;
+	:param gpu_cluster: an existing dask cluster object to use. This param should be used if you call this method
+		too many times in quick successions. Note that this function doesn't close an externally created cluster.
+	:param client: an existing dask cluster object to use. This param should be used if you call this method
+		too many times in quick successions. Note that this function doesn't close an externally created client.
+	:return:
+		If the input features X is a pandas DataFrame, returns a array-like DataFrame of single column containing
+		the predictions;
+		
+		Otherwise, if the input features X is a numpy ndarray, returns a 1D ndarray containing the predictions .
+	'''
+	if gpu_cluster is None:
+		local_gpus = LocalCUDACluster(n_workers=n_gpus, threads_per_worker=n_threads_per_gpu)
+	else:
+		local_gpus = gpu_cluster
+	if client is None:
+		local_dask_client = Client(local_gpus)
+	else:
+		local_dask_client = client
 	
 	if data_chunksize is None:
 		data_chunksize = X.shape[0] // len(local_gpus.cuda_visible_devices)
@@ -89,43 +129,104 @@ def predict_gpu_xgbmodel(xgb_model, X, data_chunksize=None, n_gpus=None, n_threa
 	
 	y_predicted = dask_xgboost_predict(local_dask_client, xgb_model, X)
 	y_predicted = pd.DataFrame(y_predicted)
+	
+	if client is None:
+		local_dask_client.close()
+	if gpu_cluster is None:
+		local_gpus.close()
+	
 	if ndarray:
 		return y_predicted.to_numpy()
 	return y_predicted
 
-def example():
-	from sklearn.metrics import accuracy_score, confusion_matrix
-	n = 10000
-	class_proportion = 0.77
-	X_train = np.random.random(size=(n, n))
-	y_train = np.array([1 if np.sum(X_train[i, :]) > class_proportion * n else 0 for i in range(X_train.shape[0])])
-	classification_xgbmodel = train_gpu_XGBClassifier2(X_train, y_train, n_gpus=1, n_threads_per_gpu=1, xgboost_model=None)
-	for i in range(20):
-		X_train = np.random.random(size=(n, n))
-		y_train = np.array([1 if np.sum(X_train[i, :]) > class_proportion * n else 0 for i in range(X_train.shape[0])])
-		classification_xgbmodel = train_gpu_XGBClassifier2(X_train, y_train, n_gpus=1, n_threads_per_gpu=1, xgboost_model=classification_xgbmodel)
+def _example():
+	# the following imports are meant to be used only in the scope of this example, therefore,
+	# they were placed here for performance issues regarding external modules calling this one
+	from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score
+	from sklearn.metrics import explained_variance_score, mean_squared_error, max_error
+	from os.path import exists
 	
-	X_test = np.random.random(size=(n, n))
-	y_true = np.array([1 if np.sum(X_train[i, :]) > class_proportion * n else 0 for i in range(X_test.shape[0])])
-	y_pred = predict_gpu_xgbmodel(classification_xgbmodel, X_test, n_gpus=1, n_threads_per_gpu=1)
-	y_pred = pd.DataFrame(y_pred)
+	base_path = ''
+	if exists('../models/'):
+		base_path = '../models/'
 	
+	# [WARNING]: choose carefully the below parameters according to your machine, avoiding, for example, consuming
+	# more memory than what's available
+	n, m = 10 ** 4, 10
+	rand = np.random.Generator(np.random.PCG64())
 	
-	acc = accuracy_score(y_true, y_pred)
-	cm = confusion_matrix(y_true, y_pred)
+	print('========== *** XGBoost Classification example *** ==========')
+	params = {
+		'learning_rate': 0.3,
+		'max_depth': 8,
+		'objective': 'binary:hinge',
+		'verbosity': 0,
+		'tree_method': 'gpu_hist'
+	}
+	class_proportion = 0.5
+	X = rand.random(size=(n, m))
+	y = np.array([1 if np.sum(X[i, :]) > class_proportion * m else 0 for i in range(X.shape[0])])
+	classification_xgbmodel = train_xgboost_gpu(X, y, params=params, n_gpus=1, n_threads_per_gpu=1, xgboost_model=None)
 	
-	print('{:.2f}% accuracy'.format(acc * 100))
+	X = rand.random(size=(n, m))
+	y = np.array([1 if np.sum(X[i, :]) > class_proportion * m else 0 for i in range(X.shape[0])])
+	y_pred = predict_xgboost_gpu(classification_xgbmodel, X, n_gpus=1, n_threads_per_gpu=1)
+	'''
+	# my tests have shown that predicting over the GPU is much slower than over the CPU
+	# to predict using the CPU instead of the GPU, use the following example code
+	from xgboost import DMatrix
+	y_pred = classification_xgbmodel['booster'].predict(DMatrix(pd.DataFrame(X, columns=[i for i in range(m)])))
+	'''
+	
+	acc = accuracy_score(y, y_pred)
+	cm = confusion_matrix(y, y_pred)
+	print('accuracy: {:.2f}%'.format(acc * 100))
 	print('confusion matrix:')
 	print(cm)
+	try:
+		print('ROC AUC score: {:.2f}%'.format(roc_auc_score(y, y_pred) * 100))
+	except:
+		pass
 	
-	classification_xgbmodel['booster'].save_model('../models/001.model')
+	# save your model as follows
+	classification_xgbmodel['booster'].save_model(base_path + 'my_classf_model001.xgbmodel')
 	
+	print('========== *** XGBoost Regression example *** ==========')
+	transformation = rand.random(size=m)
+	X = rand.random(size=(n, m))
+	y = np.matmul(X, transformation)
+	params = {
+		'learning_rate': 0.3,
+		'max_depth': 8,
+		'objective': 'reg:squarederror',
+		'verbosity': 0,
+		'tree_method': 'gpu_hist'
+	}
+	regression_xgbmodel = train_xgboost_gpu(X, y, params=params)
+	X = rand.random(size=(n, m))
+	y = np.matmul(X, transformation)
+	y_pred = predict_xgboost_gpu(regression_xgbmodel, X)
+	'''
+	# my tests have shown that predicting over the GPU is much slower than over the CPU
+	# to predict using the CPU instead of the GPU, use the following example code
+	from xgboost import DMatrix
+	y_pred = regression_xgbmodel['booster'].predict(DMatrix(pd.DataFrame(X, columns=[i for i in range(m)])))
+	'''
 	
+	vscore = explained_variance_score(y, y_pred)
+	mse = mean_squared_error(y, y_pred)
+	me = max_error(y, y_pred)
+	print('Variance score: {:.2f}'.format(vscore))
+	print('Mean squared error: {:.2f}'.format(mse))
+	print('Maximum absolute error: {:.2f}'.format(me))
+
+	# save your model as follows
+	regression_xgbmodel['booster'].save_model(base_path + 'my_reg_model001.xgbmodel')
 
 
 if __name__ == '__main__':
 	from time import time
 	t_start = time()
-	example()
+	_example()
 	t_end = time() - t_start
 	print('executed in {:.2f} seconds'.format(t_end))
