@@ -4,6 +4,7 @@ SPDX-License-Identifier: Apache-2.0
 ========================================================================================================================
 Author: Guilherme Oliveira
 Date: july 06, 2020
+Contact: gmmoliveira1@gmail.com
 License: Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0)
 ========================================================================================================================
 This script implements functions to facilitate the execution of the XGBoost algorithm on multiple GPUs on a single-
